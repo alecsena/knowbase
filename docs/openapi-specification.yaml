@@ -1,0 +1,3777 @@
+openapi: 3.0.3
+
+info:
+  title: Sistema de Gestão de Documentos e Conhecimento - API
+  description: |
+    API REST para gestão de documentos com workflow de aprovação, comentários e conversão automática.
+    
+    ## Recursos Principais
+    - Autenticação JWT
+    - Gestão de usuários e grupos (RBAC)
+    - CRUD de documentos com versionamento
+    - Workflow de aprovação (DRAFT → PENDING → APPROVED → PUBLISHED)
+    - Sistema de comentários com @menções
+    - Conversão assíncrona de documentos (PDF, DOCX, etc.)
+    - Notificações em tempo real
+    - Busca full-text
+    
+    ## Autenticação
+    Todos os endpoints (exceto `/auth/login`) requerem token JWT no header:
+    ```
+    Authorization: Bearer <token>
+    ```
+    
+  version: 1.0.0
+  contact:
+    name: Equipe de Desenvolvimento
+    email: dev@empresa.com
+  license:
+    name: Proprietário
+    
+servers:
+  - url: https://api.documentos.empresa.com/api/v1
+    description: Servidor de Produção
+  - url: https://api-staging.documentos.empresa.com/api/v1
+    description: Servidor de Staging
+  - url: http://localhost:8000/api/v1
+    description: Servidor de Desenvolvimento
+
+tags:
+  - name: Autenticação
+    description: Endpoints de autenticação e autorização
+  - name: Usuários
+    description: Gestão de usuários
+  - name: Grupos
+    description: Gestão de grupos e atribuição de papéis
+  - name: Pastas
+    description: Gestão de pastas hierárquicas
+  - name: Documentos
+    description: CRUD de documentos
+  - name: Templates
+    description: Templates de documentos
+  - name: Comentários
+    description: Sistema de comentários e @menções
+  - name: Workflow
+    description: Workflow de aprovação
+  - name: Conversão
+    description: Conversão de documentos
+  - name: Notificações
+    description: Sistema de notificações
+  - name: Relatórios
+    description: Relatórios e analytics
+  - name: Busca
+    description: Busca global de documentos
+  - name: Upload
+    description: Upload de arquivos
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ==================== AUTENTICAÇÃO ====================
+  /auth/login:
+    post:
+      tags:
+        - Autenticação
+      summary: Login de usuário
+      description: Autentica usuário e retorna JWT token
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: joao@empresa.com
+                password:
+                  type: string
+                  format: password
+                  example: SenhaForte123!
+      responses:
+        '200':
+          description: Login bem-sucedido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          
+  /auth/logout:
+    post:
+      tags:
+        - Autenticação
+      summary: Logout de usuário
+      description: Invalida token JWT atual (adiciona à blacklist)
+      operationId: logout
+      responses:
+        '204':
+          description: Logout bem-sucedido
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          
+  /auth/refresh:
+    post:
+      tags:
+        - Autenticação
+      summary: Renovar token
+      description: Renova token JWT antes da expiração
+      operationId: refreshToken
+      responses:
+        '200':
+          description: Token renovado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                    example: Bearer
+                  expires_in:
+                    type: integer
+                    example: 86400
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          
+  /auth/reset-password:
+    post:
+      tags:
+        - Autenticação
+      summary: Solicitar reset de senha
+      description: Envia email com link de reset de senha
+      operationId: requestPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: joao@empresa.com
+      responses:
+        '200':
+          description: Email enviado (se existir)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Se o email existir, você receberá instruções para resetar sua senha.
+                    
+  /auth/reset-password/confirm:
+    post:
+      tags:
+        - Autenticação
+      summary: Confirmar reset de senha
+      description: Define nova senha usando token de reset
+      operationId: confirmPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+                - new_password
+              properties:
+                token:
+                  type: string
+                  format: uuid
+                  example: 550e8400-e29b-41d4-a716-446655440000
+                new_password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  example: NovaSenhaForte123!
+      responses:
+        '200':
+          description: Senha alterada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Senha alterada com sucesso
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ==================== USUÁRIOS ====================
+  /users:
+    post:
+      tags:
+        - Usuários
+      summary: Criar usuário
+      description: Cria novo usuário (apenas Super Admin)
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+      responses:
+        '201':
+          description: Usuário criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+    get:
+      tags:
+        - Usuários
+      summary: Listar usuários
+      description: Lista usuários com paginação e filtros (apenas Super Admin)
+      operationId: listUsers
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: search
+          in: query
+          description: Busca por nome ou email
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filtrar por status
+          schema:
+            type: string
+            enum: [active, inactive]
+        - name: group_id
+          in: query
+          description: Filtrar por grupo
+          schema:
+            type: integer
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [name, email, created_at]
+            default: name
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+      responses:
+        '200':
+          description: Lista de usuários
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /users/{user_id}:
+    get:
+      tags:
+        - Usuários
+      summary: Obter usuário por ID
+      operationId: getUser
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Detalhes do usuário
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          
+    put:
+      tags:
+        - Usuários
+      summary: Atualizar usuário
+      operationId: updateUser
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200':
+          description: Usuário atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          
+  /users/{user_id}/deactivate:
+    patch:
+      tags:
+        - Usuários
+      summary: Desativar usuário
+      operationId: deactivateUser
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Usuário desativado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                    example: inactive
+                  deactivated_at:
+                    type: string
+                    format: date-time
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          
+  /users/{user_id}/activate:
+    patch:
+      tags:
+        - Usuários
+      summary: Reativar usuário
+      operationId: activateUser
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Usuário reativado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                    example: active
+                  reactivated_at:
+                    type: string
+                    format: date-time
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /users/me:
+    get:
+      tags:
+        - Usuários
+      summary: Obter perfil atual
+      description: Retorna perfil do usuário autenticado
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Perfil do usuário
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+                
+    put:
+      tags:
+        - Usuários
+      summary: Atualizar perfil atual
+      operationId: updateCurrentUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200':
+          description: Perfil atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          
+  /users/me/change-password:
+    post:
+      tags:
+        - Usuários
+      summary: Alterar senha
+      description: Altera senha do usuário autenticado
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - current_password
+                - new_password
+              properties:
+                current_password:
+                  type: string
+                  format: password
+                new_password:
+                  type: string
+                  format: password
+                  minLength: 8
+      responses:
+        '200':
+          description: Senha alterada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Senha alterada com sucesso
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ==================== GRUPOS ====================
+  /groups:
+    post:
+      tags:
+        - Grupos
+      summary: Criar grupo
+      operationId: createGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupCreate'
+      responses:
+        '201':
+          description: Grupo criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+    get:
+      tags:
+        - Grupos
+      summary: Listar grupos
+      description: Lista grupos acessíveis ao usuário
+      operationId: listGroups
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: include_stats
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Lista de grupos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  groups:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GroupListItem'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                    
+  /groups/{group_id}:
+    get:
+      tags:
+        - Grupos
+      summary: Obter grupo por ID
+      operationId: getGroup
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Detalhes do grupo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupDetail'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          
+    put:
+      tags:
+        - Grupos
+      summary: Atualizar grupo
+      operationId: updateGroup
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupUpdate'
+      responses:
+        '200':
+          description: Grupo atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /groups/{group_id}/users:
+    post:
+      tags:
+        - Grupos
+      summary: Adicionar usuário ao grupo
+      operationId: addUserToGroup
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+                - roles
+              properties:
+                user_id:
+                  type: integer
+                roles:
+                  type: array
+                  items:
+                    type: string
+                    enum: [super_admin, admin_grupo, revisor, editor, reader]
+      responses:
+        '201':
+          description: Usuário adicionado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /groups/{group_id}/users/{user_id}:
+    put:
+      tags:
+        - Grupos
+      summary: Atualizar papéis do usuário
+      operationId: updateUserRoles
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - roles
+              properties:
+                roles:
+                  type: array
+                  items:
+                    type: string
+                    enum: [admin_grupo, revisor, editor, reader]
+      responses:
+        '200':
+          description: Papéis atualizados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMember'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+    delete:
+      tags:
+        - Grupos
+      summary: Remover usuário do grupo
+      operationId: removeUserFromGroup
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '204':
+          description: Usuário removido
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==================== PASTAS ====================
+  /folders:
+    post:
+      tags:
+        - Pastas
+      summary: Criar pasta
+      operationId: createFolder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FolderCreate'
+      responses:
+        '201':
+          description: Pasta criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Folder'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /groups/{group_id}/folders/tree:
+    get:
+      tags:
+        - Pastas
+      summary: Listar pastas em árvore
+      description: Retorna estrutura hierárquica de pastas
+      operationId: getFoldersTree
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Árvore de pastas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  folders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FolderTree'
+                      
+  /groups/{group_id}/folders:
+    get:
+      tags:
+        - Pastas
+      summary: Listar pastas (flat)
+      operationId: listFolders
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: parent_folder_id
+          in: query
+          schema:
+            type: integer
+        - name: search
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista de pastas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  folders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Folder'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                    
+  /folders/{folder_id}:
+    get:
+      tags:
+        - Pastas
+      summary: Obter pasta por ID
+      operationId: getFolder
+      parameters:
+        - $ref: '#/components/parameters/FolderId'
+      responses:
+        '200':
+          description: Detalhes da pasta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FolderDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          
+    put:
+      tags:
+        - Pastas
+      summary: Atualizar pasta
+      operationId: updateFolder
+      parameters:
+        - $ref: '#/components/parameters/FolderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FolderUpdate'
+      responses:
+        '200':
+          description: Pasta atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Folder'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+    delete:
+      tags:
+        - Pastas
+      summary: Deletar pasta
+      description: Deleta pasta vazia
+      operationId: deleteFolder
+      parameters:
+        - $ref: '#/components/parameters/FolderId'
+      responses:
+        '204':
+          description: Pasta deletada
+        '400':
+          description: Pasta não está vazia
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==================== DOCUMENTOS ====================
+  /documents:
+    post:
+      tags:
+        - Documentos
+      summary: Criar documento
+      operationId: createDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentCreate'
+      responses:
+        '201':
+          description: Documento criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+    get:
+      tags:
+        - Documentos
+      summary: Listar documentos
+      operationId: listDocuments
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: group_id
+          in: query
+          schema:
+            type: integer
+        - name: folder_id
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, pending_approval, approved, published, changes_requested, archived, deprecated]
+        - name: category_id
+          in: query
+          schema:
+            type: integer
+        - name: tags
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: created_by
+          in: query
+          schema:
+            type: integer
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [title, created_at, updated_at, published_at]
+            default: updated_at
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: Lista de documentos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DocumentListItem'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                    
+  /documents/from-template:
+    post:
+      tags:
+        - Documentos
+      summary: Criar documento a partir de template
+      operationId: createDocumentFromTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - template_id
+                - title
+                - group_id
+              properties:
+                template_id:
+                  type: integer
+                title:
+                  type: string
+                group_id:
+                  type: integer
+                folder_id:
+                  type: integer
+      responses:
+        '201':
+          description: Documento criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          
+  /documents/pending-approval:
+    get:
+      tags:
+        - Documentos
+      summary: Listar documentos pendentes de aprovação
+      description: Lista documentos PENDING_APPROVAL dos grupos do revisor
+      operationId: listPendingDocuments
+      parameters:
+        - name: group_id
+          in: query
+          schema:
+            type: integer
+        - name: author_id
+          in: query
+          schema:
+            type: integer
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [submitted_at, title]
+            default: submitted_at
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista de documentos pendentes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PendingDocument'
+                  total:
+                    type: integer
+                    
+  /documents/{document_id}:
+    get:
+      tags:
+        - Documentos
+      summary: Obter documento por ID
+      operationId: getDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+        - name: include_comments
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: include_versions
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Detalhes do documento
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDetail'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          
+    patch:
+      tags:
+        - Documentos
+      summary: Atualizar documento
+      description: Atualiza documento (auto-save ou edição completa)
+      operationId: updateDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentUpdate'
+      responses:
+        '200':
+          description: Documento atualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  title:
+                    type: string
+                  content:
+                    type: string
+                  updated_at:
+                    type: string
+                    format: date-time
+                  auto_saved:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          
+    delete:
+      tags:
+        - Documentos
+      summary: Deletar documento
+      description: Deleta documento em DRAFT
+      operationId: deleteDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '204':
+          description: Documento deletado
+        '400':
+          description: Apenas documentos DRAFT podem ser deletados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/lock:
+    post:
+      tags:
+        - Documentos
+      summary: Adquirir lock de edição
+      operationId: acquireLock
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Lock adquirido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentLock'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          
+    put:
+      tags:
+        - Documentos
+      summary: Renovar lock (heartbeat)
+      operationId: renewLock
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Lock renovado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locked:
+                    type: boolean
+                  lock_expires_at:
+                    type: string
+                    format: date-time
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+    delete:
+      tags:
+        - Documentos
+      summary: Liberar lock
+      operationId: releaseLock
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '204':
+          description: Lock liberado
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/archive:
+    post:
+      tags:
+        - Documentos
+      summary: Arquivar documento
+      operationId: archiveDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Documento arquivado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                    example: archived
+                  archived_at:
+                    type: string
+                    format: date-time
+                  archived_by:
+                    $ref: '#/components/schemas/UserReference'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/unpublish:
+    post:
+      tags:
+        - Documentos
+      summary: Despublicar documento
+      description: Volta documento PUBLISHED para DRAFT
+      operationId: unpublishDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Documento despublicado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                    example: draft
+                  unpublished_at:
+                    type: string
+                    format: date-time
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/deprecate:
+    post:
+      tags:
+        - Documentos
+      summary: Marcar como DEPRECATED
+      operationId: deprecateDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                replacement_document_id:
+                  type: integer
+      responses:
+        '200':
+          description: Documento marcado como DEPRECATED
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                    example: deprecated
+                  deprecated_at:
+                    type: string
+                    format: date-time
+                  deprecated_by:
+                    $ref: '#/components/schemas/UserReference'
+                  deprecation_reason:
+                    type: string
+                  replacement_document:
+                    $ref: '#/components/schemas/DocumentReference'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==================== TEMPLATES ====================
+  /templates:
+    post:
+      tags:
+        - Templates
+      summary: Criar template
+      operationId: createTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateCreate'
+      responses:
+        '201':
+          description: Template criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+    get:
+      tags:
+        - Templates
+      summary: Listar templates
+      operationId: listTemplates
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [name, created_at]
+            default: name
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista de templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  templates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TemplateListItem'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                    
+  /templates/{template_id}:
+    get:
+      tags:
+        - Templates
+      summary: Obter template por ID
+      operationId: getTemplate
+      parameters:
+        - $ref: '#/components/parameters/TemplateId'
+      responses:
+        '200':
+          description: Detalhes do template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          
+    put:
+      tags:
+        - Templates
+      summary: Atualizar template
+      operationId: updateTemplate
+      parameters:
+        - $ref: '#/components/parameters/TemplateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateUpdate'
+      responses:
+        '200':
+          description: Template atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+    delete:
+      tags:
+        - Templates
+      summary: Deletar template
+      operationId: deleteTemplate
+      parameters:
+        - $ref: '#/components/parameters/TemplateId'
+      responses:
+        '204':
+          description: Template deletado
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==================== COMENTÁRIOS ====================
+  /documents/{document_id}/comments:
+    post:
+      tags:
+        - Comentários
+      summary: Adicionar comentário
+      description: Adiciona comentário em trecho ou geral
+      operationId: addComment
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentCreate'
+      responses:
+        '201':
+          description: Comentário criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+    get:
+      tags:
+        - Comentários
+      summary: Listar comentários do documento
+      operationId: listComments
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+        - name: include_resolved
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: include_deleted
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: critical_only
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Lista de comentários
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Comment'
+                  general_comments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Comment'
+                  stats:
+                    $ref: '#/components/schemas/CommentStats'
+                    
+  /documents/{document_id}/comments/stats:
+    get:
+      tags:
+        - Comentários
+      summary: Estatísticas de comentários
+      operationId: getCommentStats
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Estatísticas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentStatsDetail'
+                
+  /documents/{document_id}/comments/resolve-all:
+    post:
+      tags:
+        - Comentários
+      summary: Resolver todos os comentários
+      operationId: resolveAllComments
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Comentários resolvidos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resolved_count:
+                    type: integer
+                  message:
+                    type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/comments/export:
+    post:
+      tags:
+        - Comentários
+      summary: Exportar comentários
+      description: Exporta comentários para PDF ou CSV (assíncrono)
+      operationId: exportComments
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - format
+              properties:
+                format:
+                  type: string
+                  enum: [pdf, csv]
+                include_resolved:
+                  type: boolean
+                  default: true
+                critical_only:
+                  type: boolean
+                  default: false
+                sort_by:
+                  type: string
+                  enum: [position, created_at]
+                  default: position
+      responses:
+        '202':
+          description: Exportação iniciada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    example: processing
+                  message:
+                    type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /comments/{comment_id}:
+    get:
+      tags:
+        - Comentários
+      summary: Obter comentário por ID
+      operationId: getComment
+      parameters:
+        - $ref: '#/components/parameters/CommentId'
+      responses:
+        '200':
+          description: Detalhes do comentário
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          
+    delete:
+      tags:
+        - Comentários
+      summary: Deletar comentário
+      description: Soft delete de comentário
+      operationId: deleteComment
+      parameters:
+        - $ref: '#/components/parameters/CommentId'
+      responses:
+        '204':
+          description: Comentário deletado
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /comments/{comment_id}/resolve:
+    put:
+      tags:
+        - Comentários
+      summary: Resolver/Não resolver comentário
+      operationId: resolveComment
+      parameters:
+        - $ref: '#/components/parameters/CommentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - resolved
+              properties:
+                resolved:
+                  type: boolean
+      responses:
+        '200':
+          description: Status atualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  resolved:
+                    type: boolean
+                  resolved_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  resolved_by:
+                    $ref: '#/components/schemas/UserReference'
+                    nullable: true
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==================== WORKFLOW ====================
+  /documents/{document_id}/submit-for-approval:
+    post:
+      tags:
+        - Workflow
+      summary: Enviar para aprovação
+      description: Envia documento DRAFT para aprovação
+      operationId: submitForApproval
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reviewer_message:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Documento enviado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionResponse'
+        '400':
+          description: Há comentários não resolvidos ou documento inválido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: unresolved_comments
+                  message:
+                    type: string
+                  unresolved_comments_count:
+                    type: integer
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/cancel-submission:
+    post:
+      tags:
+        - Workflow
+      summary: Cancelar envio
+      description: Cancela envio para aprovação (volta para DRAFT)
+      operationId: cancelSubmission
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Envio cancelado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                    example: draft
+                  message:
+                    type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/review:
+    get:
+      tags:
+        - Workflow
+      summary: Obter documento em modo revisão
+      description: Retorna documento com informações de revisão
+      operationId: getDocumentForReview
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Documento para revisão
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDocument'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/approve:
+    post:
+      tags:
+        - Workflow
+      summary: Aprovar documento
+      operationId: approveDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                review_notes:
+                  type: string
+                  maxLength: 1000
+      responses:
+        '200':
+          description: Documento aprovado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/request-changes:
+    post:
+      tags:
+        - Workflow
+      summary: Solicitar mudanças
+      description: Rejeita documento e solicita correções
+      operationId: requestChanges
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - review_notes
+              properties:
+                review_notes:
+                  type: string
+                  minLength: 10
+                  maxLength: 1000
+                notify_immediately:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Mudanças solicitadas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RejectionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/changes-requested:
+    get:
+      tags:
+        - Workflow
+      summary: Visualizar mudanças solicitadas
+      description: Retorna detalhes de mudanças solicitadas
+      operationId: getChangesRequested
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Detalhes de mudanças
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangesRequestedDetail'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/approval-history:
+    get:
+      tags:
+        - Workflow
+      summary: Histórico de aprovações
+      description: Retorna histórico completo de aprovações
+      operationId: getApprovalHistory
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Histórico
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ApprovalHistoryItem'
+
+  # ==================== CONVERSÃO ====================
+  /documents/upload:
+    post:
+      tags:
+        - Conversão
+      summary: Upload de arquivo para conversão
+      description: Faz upload de arquivo para conversão em Markdown
+      operationId: uploadDocument
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - title
+                - group_id
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Arquivo a ser convertido (PDF, DOCX, etc.)
+                title:
+                  type: string
+                group_id:
+                  type: integer
+                folder_id:
+                  type: integer
+                category_id:
+                  type: integer
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Upload bem-sucedido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400':
+          description: Arquivo inválido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: invalid_file
+                  message:
+                    type: string
+                  supported_types:
+                    type: array
+                    items:
+                      type: string
+        '413':
+          description: Arquivo muito grande
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: file_too_large
+                  message:
+                    type: string
+                  max_size_bytes:
+                    type: integer
+                    example: 104857600
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/status-stream:
+    get:
+      tags:
+        - Conversão
+      summary: Status stream de conversão (SSE)
+      description: Stream de eventos de conversão em tempo real
+      operationId: getConversionStatusStream
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  event: status_update
+                  data: {"status": "processing", "progress": 50, "message": "Convertendo páginas..."}
+                  
+                  event: heartbeat
+                  data: {"timestamp": "2024-01-17T10:31:00Z"}
+                  
+                  event: status_update
+                  data: {"status": "draft", "progress": 100, "message": "Conversão concluída!"}
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/retry-conversion:
+    post:
+      tags:
+        - Conversão
+      summary: Re-upload após falha
+      description: Reinicia conversão com novo arquivo após falha
+      operationId: retryConversion
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Nova tentativa iniciada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                    example: processing
+                  celery_task_id:
+                    type: string
+                    format: uuid
+                  conversion_attempts:
+                    type: integer
+                  message:
+                    type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /documents/{document_id}/conversion-logs:
+    get:
+      tags:
+        - Conversão
+      summary: Logs de conversão
+      description: Retorna logs de tentativas de conversão
+      operationId: getConversionLogs
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Logs de conversão
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConversionLog'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==================== NOTIFICAÇÕES ====================
+  /notifications:
+    get:
+      tags:
+        - Notificações
+      summary: Listar notificações
+      operationId: listNotifications
+      parameters:
+        - name: unread
+          in: query
+          schema:
+            type: boolean
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Lista de notificações
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+                  unread_count:
+                    type: integer
+                  total:
+                    type: integer
+                    
+  /notifications/{notification_id}/read:
+    put:
+      tags:
+        - Notificações
+      summary: Marcar notificação como lida
+      operationId: markNotificationAsRead
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Notificação marcada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  read:
+                    type: boolean
+                  read_at:
+                    type: string
+                    format: date-time
+                    
+  /notifications/mark-all-read:
+    put:
+      tags:
+        - Notificações
+      summary: Marcar todas como lidas
+      operationId: markAllNotificationsAsRead
+      responses:
+        '200':
+          description: Notificações marcadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marked_count:
+                    type: integer
+                  message:
+                    type: string
+                    
+  /users/me/notification-preferences:
+    get:
+      tags:
+        - Notificações
+      summary: Obter preferências de notificação
+      operationId: getNotificationPreferences
+      responses:
+        '200':
+          description: Preferências
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+                
+    put:
+      tags:
+        - Notificações
+      summary: Atualizar preferências
+      operationId: updateNotificationPreferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPreferences'
+      responses:
+        '200':
+          description: Preferências atualizadas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+                
+  /users/me/mentions:
+    get:
+      tags:
+        - Notificações
+      summary: Listar menções
+      description: Lista comentários onde usuário foi mencionado
+      operationId: listMentions
+      parameters:
+        - name: unread
+          in: query
+          schema:
+            type: boolean
+        - name: document_id
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Lista de menções
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mentions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Mention'
+                  unread_count:
+                    type: integer
+
+  # ==================== RELATÓRIOS ====================
+  /reports/approval-workflow:
+    get:
+      tags:
+        - Relatórios
+      summary: Relatório de workflow de aprovação
+      operationId: getApprovalWorkflowReport
+      parameters:
+        - name: group_id
+          in: query
+          schema:
+            type: integer
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Relatório
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalWorkflowReport'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          
+  /reports/documents:
+    get:
+      tags:
+        - Relatórios
+      summary: Relatório de documentos
+      operationId: getDocumentsReport
+      parameters:
+        - name: group_id
+          in: query
+          schema:
+            type: integer
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Relatório
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentsReport'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ==================== BUSCA ====================
+  /search:
+    get:
+      tags:
+        - Busca
+      summary: Busca global
+      description: Busca em documentos respeitando permissões
+      operationId: searchDocuments
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Termo de busca
+          schema:
+            type: string
+        - name: group_id
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: category_id
+          in: query
+          schema:
+            type: integer
+        - name: tags
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: created_after
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: created_before
+          in: query
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Resultados da busca
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+
+  # ==================== UPLOAD ====================
+  /upload/image:
+    post:
+      tags:
+        - Upload
+      summary: Upload de imagem
+      description: Upload de imagem para uso em documentos
+      operationId: uploadImage
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - document_id
+              properties:
+                file:
+                  type: string
+                  format: binary
+                document_id:
+                  type: integer
+      responses:
+        '201':
+          description: Imagem enviada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                  filename:
+                    type: string
+                  size:
+                    type: integer
+                  mime_type:
+                    type: string
+                  width:
+                    type: integer
+                  height:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+# ==================== COMPONENTS ====================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtido via /auth/login
+      
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: Número da página
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+        
+    PerPage:
+      name: per_page
+      in: query
+      description: Itens por página
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+        
+    UserId:
+      name: user_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        
+    GroupId:
+      name: group_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        
+    FolderId:
+      name: folder_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        
+    DocumentId:
+      name: document_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        
+    TemplateId:
+      name: template_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        
+    CommentId:
+      name: comment_id
+      in: path
+      required: true
+      schema:
+        type: integer
+
+  schemas:
+    # ========== Schemas de Usuário ==========
+    UserCreate:
+      type: object
+      required:
+        - full_name
+        - email
+        - password
+      properties:
+        full_name:
+          type: string
+          minLength: 2
+          maxLength: 255
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+        phone:
+          type: string
+          nullable: true
+        job_title:
+          type: string
+          nullable: true
+          
+    UserUpdate:
+      type: object
+      properties:
+        full_name:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        job_title:
+          type: string
+          nullable: true
+          
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        full_name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+          nullable: true
+        job_title:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [active, inactive]
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+          
+    UserDetail:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            groups:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  roles:
+                    type: array
+                    items:
+                      type: string
+            stats:
+              type: object
+              properties:
+                documents_created:
+                  type: integer
+                comments_added:
+                  type: integer
+                documents_reviewed:
+                  type: integer
+                  
+    UserProfile:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            groups:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  roles:
+                    type: array
+                    items:
+                      type: string
+            notification_preferences:
+              $ref: '#/components/schemas/NotificationPreferences'
+              
+    UserReference:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        avatar_url:
+          type: string
+          format: uri
+          nullable: true
+          
+    LoginResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          example: 86400
+        user:
+          type: object
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+            email:
+              type: string
+            groups:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  roles:
+                    type: array
+                    items:
+                      type: string
+
+    # ========== Schemas de Grupo ==========
+    GroupCreate:
+      type: object
+      required:
+        - name
+        - description
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 255
+        description:
+          type: string
+        color:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          example: '#3B82F6'
+        icon:
+          type: string
+          example: laptop
+          
+    GroupUpdate:
+      $ref: '#/components/schemas/GroupCreate'
+      
+    Group:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        color:
+          type: string
+        icon:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          $ref: '#/components/schemas/UserReference'
+          
+    GroupListItem:
+      allOf:
+        - $ref: '#/components/schemas/Group'
+        - type: object
+          properties:
+            my_roles:
+              type: array
+              items:
+                type: string
+            stats:
+              type: object
+              properties:
+                members_count:
+                  type: integer
+                documents_count:
+                  type: integer
+                folders_count:
+                  type: integer
+                  
+    GroupDetail:
+      allOf:
+        - $ref: '#/components/schemas/Group'
+        - type: object
+          properties:
+            members:
+              type: array
+              items:
+                $ref: '#/components/schemas/GroupMember'
+            stats:
+              type: object
+              properties:
+                members_count:
+                  type: integer
+                documents_count:
+                  type: integer
+                published_count:
+                  type: integer
+                pending_approval_count:
+                  type: integer
+                folders_count:
+                  type: integer
+                  
+    GroupMember:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [admin_grupo, revisor, editor, reader]
+        added_at:
+          type: string
+          format: date-time
+        added_by:
+          $ref: '#/components/schemas/UserReference'
+
+    # ========== Schemas de Pasta ==========
+    FolderCreate:
+      type: object
+      required:
+        - name
+        - group_id
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        group_id:
+          type: integer
+        parent_folder_id:
+          type: integer
+          nullable: true
+          
+    FolderUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+          
+    Folder:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        group_id:
+          type: integer
+        parent_folder_id:
+          type: integer
+          nullable: true
+        path:
+          type: string
+          example: /Políticas/RH
+        level:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          $ref: '#/components/schemas/UserReference'
+          
+    FolderDetail:
+      allOf:
+        - $ref: '#/components/schemas/Folder'
+        - type: object
+          properties:
+            breadcrumb:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+            documents_count:
+              type: integer
+            subfolders_count:
+              type: integer
+              
+    FolderTree:
+      allOf:
+        - $ref: '#/components/schemas/Folder'
+        - type: object
+          properties:
+            documents_count:
+              type: integer
+            children:
+              type: array
+              items:
+                $ref: '#/components/schemas/FolderTree'
+
+    # ========== Schemas de Documento ==========
+    DocumentCreate:
+      type: object
+      required:
+        - title
+        - group_id
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 500
+        content:
+          type: string
+          nullable: true
+        group_id:
+          type: integer
+        folder_id:
+          type: integer
+          nullable: true
+        category_id:
+          type: integer
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+          maxItems: 20
+          
+    DocumentUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+        category_id:
+          type: integer
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+            
+    Document:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        status:
+          type: string
+          enum: [draft, new, processing, pending_approval, approved, published, changes_requested, archived, deprecated]
+        group_id:
+          type: integer
+        folder_id:
+          type: integer
+          nullable: true
+        category_id:
+          type: integer
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        content:
+          type: string
+          nullable: true
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          $ref: '#/components/schemas/UserReference'
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_by:
+          $ref: '#/components/schemas/UserReference'
+          nullable: true
+          
+    DocumentListItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        status:
+          type: string
+        group:
+          type: object
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+        folder:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+            path:
+              type: string
+        category:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+        tags:
+          type: array
+          items:
+            type: string
+        version:
+          type: integer
+        created_by:
+          $ref: '#/components/schemas/UserReference'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        unresolved_comments_count:
+          type: integer
+          
+    DocumentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Document'
+        - type: object
+          properties:
+            group:
+              type: object
+              properties:
+                id:
+                  type: integer
+                name:
+                  type: string
+                color:
+                  type: string
+            folder:
+              type: object
+              nullable: true
+              properties:
+                id:
+                  type: integer
+                name:
+                  type: string
+                path:
+                  type: string
+            category:
+              type: object
+              nullable: true
+              properties:
+                id:
+                  type: integer
+                name:
+                  type: string
+            related_documents:
+              type: array
+              items:
+                $ref: '#/components/schemas/DocumentReference'
+            locked_by:
+              $ref: '#/components/schemas/UserReference'
+              nullable: true
+            locked_at:
+              type: string
+              format: date-time
+              nullable: true
+            published_at:
+              type: string
+              format: date-time
+              nullable: true
+            stats:
+              type: object
+              properties:
+                views_count:
+                  type: integer
+                comments_count:
+                  type: integer
+                unresolved_comments_count:
+                  type: integer
+                  
+    DocumentReference:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        status:
+          type: string
+          
+    DocumentLock:
+      type: object
+      properties:
+        locked:
+          type: boolean
+        locked_by:
+          $ref: '#/components/schemas/UserReference'
+        locked_at:
+          type: string
+          format: date-time
+        lock_expires_at:
+          type: string
+          format: date-time
+          
+    PendingDocument:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        author:
+          $ref: '#/components/schemas/UserReference'
+        group:
+          type: object
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+        folder:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+        submitted_at:
+          type: string
+          format: date-time
+        submitted_by:
+          $ref: '#/components/schemas/UserReference'
+        reviewer_message:
+          type: string
+          nullable: true
+        unresolved_comments_count:
+          type: integer
+        days_pending:
+          type: integer
+
+    # ========== Schemas de Template ==========
+    TemplateCreate:
+      type: object
+      required:
+        - name
+        - content
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        content:
+          type: string
+        default_tags:
+          type: array
+          items:
+            type: string
+        default_category_id:
+          type: integer
+          nullable: true
+          
+    TemplateUpdate:
+      $ref: '#/components/schemas/TemplateCreate'
+      
+    Template:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        content:
+          type: string
+        default_tags:
+          type: array
+          items:
+            type: string
+        default_category_id:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          $ref: '#/components/schemas/UserReference'
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          
+    TemplateListItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        preview:
+          type: string
+          description: Primeiros 200 caracteres do conteúdo
+        usage_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          $ref: '#/components/schemas/UserReference'
+
+    # ========== Schemas de Comentário ==========
+    CommentCreate:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 3
+          maxLength: 2000
+        start_offset:
+          type: integer
+          nullable: true
+        end_offset:
+          type: integer
+          nullable: true
+        selected_text:
+          type: string
+          nullable: true
+        context_before:
+          type: string
+          maxLength: 100
+          nullable: true
+        context_after:
+          type: string
+          maxLength: 100
+          nullable: true
+        is_critical:
+          type: boolean
+          default: false
+        is_general:
+          type: boolean
+          default: false
+        mentioned_user_ids:
+          type: array
+          items:
+            type: integer
+            
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+        document_id:
+          type: integer
+        text:
+          type: string
+        start_offset:
+          type: integer
+          nullable: true
+        end_offset:
+          type: integer
+          nullable: true
+        selected_text:
+          type: string
+          nullable: true
+        is_critical:
+          type: boolean
+        is_general:
+          type: boolean
+        resolved:
+          type: boolean
+        created_by:
+          $ref: '#/components/schemas/UserReference'
+        created_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_by:
+          $ref: '#/components/schemas/UserReference'
+          nullable: true
+        mentions:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserReference'
+            
+    CommentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Comment'
+        - type: object
+          properties:
+            document_title:
+              type: string
+            context_before:
+              type: string
+              nullable: true
+            context_after:
+              type: string
+              nullable: true
+              
+    CommentStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        unresolved:
+          type: integer
+        critical:
+          type: integer
+        resolved:
+          type: integer
+          
+    CommentStatsDetail:
+      allOf:
+        - $ref: '#/components/schemas/CommentStats'
+        - type: object
+          properties:
+            resolution_rate:
+              type: number
+              format: float
+            by_reviewer:
+              type: array
+              items:
+                type: object
+                properties:
+                  reviewer_id:
+                    type: integer
+                  reviewer_name:
+                    type: string
+                  total:
+                    type: integer
+                  unresolved:
+                    type: integer
+
+    # ========== Schemas de Workflow ==========
+    SubmissionResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          example: pending_approval
+        submitted_for_approval_at:
+          type: string
+          format: date-time
+        submitted_by:
+          $ref: '#/components/schemas/UserReference'
+        reviewer_message:
+          type: string
+          nullable: true
+        reviewers_notified:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserReference'
+            
+    ApprovalResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          example: approved
+        reviewed_at:
+          type: string
+          format: date-time
+        reviewed_by:
+          $ref: '#/components/schemas/UserReference'
+        review_decision:
+          type: string
+          example: approved
+        review_notes:
+          type: string
+          nullable: true
+        message:
+          type: string
+          
+    RejectionResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          example: changes_requested
+        reviewed_at:
+          type: string
+          format: date-time
+        reviewed_by:
+          $ref: '#/components/schemas/UserReference'
+        review_decision:
+          type: string
+          example: changes_requested
+        review_notes:
+          type: string
+        message:
+          type: string
+          
+    ReviewDocument:
+      type: object
+      properties:
+        document:
+          $ref: '#/components/schemas/DocumentDetail'
+        submission:
+          type: object
+          properties:
+            submitted_by:
+              $ref: '#/components/schemas/UserReference'
+            submitted_at:
+              type: string
+              format: date-time
+            reviewer_message:
+              type: string
+              nullable: true
+            previous_rejections_count:
+              type: integer
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+        previous_submissions:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              submitted_at:
+                type: string
+                format: date-time
+              reviewed_at:
+                type: string
+                format: date-time
+                nullable: true
+              reviewed_by:
+                $ref: '#/components/schemas/UserReference'
+                nullable: true
+              decision:
+                type: string
+                nullable: true
+              review_notes:
+                type: string
+                nullable: true
+        navigation:
+          type: object
+          nullable: true
+          properties:
+            previous_document_id:
+              type: integer
+              nullable: true
+            next_document_id:
+              type: integer
+              nullable: true
+              
+    ChangesRequestedDetail:
+      type: object
+      properties:
+        document:
+          $ref: '#/components/schemas/DocumentDetail'
+        current_review:
+          type: object
+          properties:
+            reviewed_by:
+              $ref: '#/components/schemas/UserReference'
+            reviewed_at:
+              type: string
+              format: date-time
+            review_notes:
+              type: string
+            comments_count:
+              type: integer
+            unresolved_comments_count:
+              type: integer
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+        previous_reviews:
+          type: array
+          items:
+            type: object
+            properties:
+              submitted_at:
+                type: string
+                format: date-time
+              reviewed_at:
+                type: string
+                format: date-time
+              reviewed_by:
+                $ref: '#/components/schemas/UserReference'
+              review_notes:
+                type: string
+                
+    ApprovalHistoryItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        action:
+          type: string
+          enum: [submitted, approved, rejected, resubmitted, cancelled, published]
+        performed_by:
+          $ref: '#/components/schemas/UserReference'
+        performed_at:
+          type: string
+          format: date-time
+        notes:
+          type: string
+          nullable: true
+        version:
+          type: string
+
+    # ========== Schemas de Conversão ==========
+    UploadResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        status:
+          type: string
+          example: new
+        original_file_name:
+          type: string
+        original_file_size:
+          type: integer
+        original_mime_type:
+          type: string
+        original_file_url:
+          type: string
+          format: uri
+        celery_task_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+          
+    ConversionLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        attempt:
+          type: integer
+        status:
+          type: string
+          enum: [success, failed]
+        error_message:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+
+    # ========== Schemas de Notificação ==========
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [document_pending_approval, document_approved, changes_requested, document_published, new_comment, mention, submission_cancelled, document_resubmitted, comments_bulk_resolved]
+        title:
+          type: string
+        message:
+          type: string
+        link:
+          type: string
+          nullable: true
+        data:
+          type: object
+          additionalProperties: true
+        read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        time_ago:
+          type: string
+          example: Há 2 horas
+          
+    NotificationPreferences:
+      type: object
+      properties:
+        email_enabled:
+          type: boolean
+          default: true
+        email_frequency:
+          type: string
+          enum: [immediate, daily, weekly]
+          default: immediate
+        notification_types:
+          type: object
+          properties:
+            document_pending_approval:
+              type: boolean
+              default: true
+            document_approved:
+              type: boolean
+              default: true
+            changes_requested:
+              type: boolean
+              default: true
+            document_published:
+              type: boolean
+              default: false
+            new_comment:
+              type: boolean
+              default: true
+            mention:
+              type: boolean
+              default: true
+              
+    Mention:
+      type: object
+      properties:
+        comment_id:
+          type: integer
+        comment_text:
+          type: string
+        document:
+          $ref: '#/components/schemas/DocumentReference'
+        author:
+          $ref: '#/components/schemas/UserReference'
+        created_at:
+          type: string
+          format: date-time
+        read:
+          type: boolean
+
+    # ========== Schemas de Relatório ==========
+    ApprovalWorkflowReport:
+      type: object
+      properties:
+        metrics:
+          type: object
+          properties:
+            total_submitted:
+              type: integer
+            total_approved:
+              type: integer
+            total_rejected:
+              type: integer
+            currently_pending:
+              type: integer
+            approval_rate:
+              type: number
+              format: float
+            rejection_rate:
+              type: number
+              format: float
+            avg_time_to_approval_hours:
+              type: number
+              format: float
+        by_reviewer:
+          type: array
+          items:
+            type: object
+            properties:
+              reviewer_id:
+                type: integer
+              reviewer_name:
+                type: string
+              approved:
+                type: integer
+              rejected:
+                type: integer
+              avg_time_hours:
+                type: number
+                format: float
+        timeline:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              submitted:
+                type: integer
+              approved:
+                type: integer
+              rejected:
+                type: integer
+                
+    DocumentsReport:
+      type: object
+      properties:
+        metrics:
+          type: object
+          properties:
+            total_documents:
+              type: integer
+            published:
+              type: integer
+            draft:
+              type: integer
+            pending_approval:
+              type: integer
+            archived:
+              type: integer
+            avg_documents_per_month:
+              type: number
+              format: float
+            most_active_authors:
+              type: array
+              items:
+                type: object
+                properties:
+                  user_id:
+                    type: integer
+                  name:
+                    type: string
+                  documents_created:
+                    type: integer
+        by_category:
+          type: array
+          items:
+            type: object
+            properties:
+              category_id:
+                type: integer
+              category_name:
+                type: string
+              count:
+                type: integer
+        timeline:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              created:
+                type: integer
+              published:
+                type: integer
+
+    # ========== Schemas de Busca ==========
+    SearchResults:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              title:
+                type: string
+              snippet:
+                type: string
+                description: Trecho do conteúdo com termo de busca destacado
+              status:
+                type: string
+              group:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+              score:
+                type: number
+                format: float
+                description: Score de relevância
+              published_at:
+                type: string
+                format: date-time
+                nullable: true
+        facets:
+          type: object
+          properties:
+            by_group:
+              type: array
+              items:
+                type: object
+                properties:
+                  group_id:
+                    type: integer
+                  group_name:
+                    type: string
+                  count:
+                    type: integer
+            by_status:
+              type: array
+              items:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  count:
+                    type: integer
+            by_category:
+              type: array
+              items:
+                type: object
+                properties:
+                  category_id:
+                    type: integer
+                  category_name:
+                    type: string
+                  count:
+                    type: integer
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    # ========== Schemas Comuns ==========
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+          
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+        path:
+          type: string
+        request_id:
+          type: string
+          format: uuid
+
+  responses:
+    BadRequest:
+      description: Requisição inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: validation_error
+            message: Dados inválidos
+            details:
+              email: ["Email já existe"]
+              password: ["Senha deve ter no mínimo 8 caracteres"]
+            timestamp: "2024-01-17T10:30:00Z"
+            path: /api/v1/users
+            request_id: 550e8400-e29b-41d4-a716-446655440000
+            
+    Unauthorized:
+      description: Não autenticado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: token_invalid
+            message: Token JWT inválido ou expirado
+            timestamp: "2024-01-17T10:30:00Z"
+            path: /api/v1/documents
+            request_id: 550e8400-e29b-41d4-a716-446655440000
+            
+    Forbidden:
+      description: Sem permissão
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: insufficient_permissions
+            message: Você não tem permissão para realizar esta ação
+            timestamp: "2024-01-17T10:30:00Z"
+            path: /api/v1/documents/123
+            request_id: 550e8400-e29b-41d4-a716-446655440000
+            
+    NotFound:
+      description: Recurso não encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: resource_not_found
+            message: Documento não encontrado
+            timestamp: "2024-01-17T10:30:00Z"
+            path: /api/v1/documents/999
+            request_id: 550e8400-e29b-41d4-a716-446655440000
+            
+    Conflict:
+      description: Conflito
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: document_locked
+            message: Documento está sendo editado por outro usuário
+            details:
+              locked_by:
+                id: 10
+                name: Maria Santos
+              locked_at: "2024-01-17T10:25:00Z"
+            timestamp: "2024-01-17T10:30:00Z"
+            path: /api/v1/documents/123/lock
+            request_id: 550e8400-e29b-41d4-a716-446655440000
+            
+    TooManyRequests:
+      description: Rate limit excedido
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Número máximo de requisições permitidas
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Número de requisições restantes
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Timestamp Unix quando o limite será resetado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: rate_limit_exceeded
+            message: Muitas tentativas de login. Tente novamente em 15 minutos.
+            details:
+              retry_after: 900
+            timestamp: "2024-01-17T10:30:00Z"
+            path: /api/v1/auth/login
+            request_id: 550e8400-e29b-41d4-a716-446655440000
