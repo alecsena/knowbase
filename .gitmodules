@@ -1,3 +1,6 @@
 [submodule "frontend"]
 	path = frontend
 	url = https://github.com/alecsena/knowbase-forntend.git
+[submodule "backend"]
+	path = backend
+	url = https://github.com/alecsena/knowbase-backend.git
