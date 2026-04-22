@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "altcoin-analyzer": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/altcoin-analyzer-mcp",
+        "run",
+        "python",
+        "-m",
+        "altcoin_analyzer.server"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-xxx",
+        "LLM_PROVIDER": "anthropic",
+        "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+        "LLM_FALLBACK_PROVIDER": "openrouter",
+        "OPENROUTER_API_KEY": "sk-or-xxx",
+        "LLM_FALLBACK_MODEL": "meta-llama/llama-3.1-70b-instruct",
+        "COINGECKO_API_KEY": "",
+        "GITHUB_TOKEN": "ghp_xxx",
+        "LOG_LEVEL": "INFO",
+        "CACHE_TTL_SECONDS": "300"
+      }
+    }
+  }
+}
