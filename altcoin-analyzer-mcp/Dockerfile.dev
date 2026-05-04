@@ -1,0 +1,21 @@
+# Dev/test image — includes all dev dependencies
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+COPY pyproject.toml uv.lock ./
+
+# Install all deps (including dev extras)
+RUN uv sync --frozen
+
+COPY src/ ./src/
+COPY tests/ ./tests/
+
+# Install package in editable mode
+RUN uv run pip install --no-deps -e . --quiet
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1

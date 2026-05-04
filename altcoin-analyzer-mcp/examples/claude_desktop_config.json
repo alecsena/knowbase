@@ -1,6 +1,10 @@
 {
+  "_comment": "Choose ONE of the two configurations below and copy to Claude Desktop settings.",
+
   "mcpServers": {
-    "altcoin-analyzer": {
+
+    "altcoin-analyzer-uv": {
+      "_comment": "Run directly with uv (recommended for local dev)",
       "command": "uv",
       "args": [
         "--directory",
@@ -11,8 +15,8 @@
         "altcoin_analyzer.server"
       ],
       "env": {
-        "ANTHROPIC_API_KEY": "sk-ant-xxx",
         "LLM_PROVIDER": "anthropic",
+        "ANTHROPIC_API_KEY": "sk-ant-xxx",
         "ANTHROPIC_MODEL": "claude-sonnet-4-6",
         "LLM_FALLBACK_PROVIDER": "openrouter",
         "OPENROUTER_API_KEY": "sk-or-xxx",
@@ -22,6 +26,19 @@
         "LOG_LEVEL": "INFO",
         "CACHE_TTL_SECONDS": "300"
       }
+    },
+
+    "altcoin-analyzer-docker": {
+      "_comment": "Run inside Docker (requires: docker compose build mcp-server)",
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "--env-file", "/absolute/path/to/altcoin-analyzer-mcp/.env",
+        "altcoin-analyzer-mcp:latest"
+      ]
     }
+
   }
 }

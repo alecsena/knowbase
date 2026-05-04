@@ -1,0 +1,79 @@
+services:
+
+  # ── MCP Server (stdio transport) ────────────────────────────────────────────
+  # Intended for use with Claude Desktop via the Docker transport.
+  # Run interactively:  docker compose run --rm mcp-server
+  # Claude Desktop config: see examples/claude_desktop_config.json
+  mcp-server:
+    build:
+      context: .
+      target: runtime
+    image: altcoin-analyzer-mcp:latest
+    container_name: altcoin-analyzer-mcp
+    stdin_open: true   # required for stdio MCP transport
+    tty: false         # MCP uses raw stdin, not a pty
+    env_file:
+      - path: .env
+        required: false   # allow running without .env (CI, quick builds)
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - COINGECKO_BASE_URL=${COINGECKO_BASE_URL:-https://api.coingecko.com/api/v3}
+      - DEFILLAMA_BASE_URL=${DEFILLAMA_BASE_URL:-https://api.llama.fi}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CACHE_TTL_SECONDS=${CACHE_TTL_SECONDS:-300}
+      - DEFAULT_RISK_PROFILE=${DEFAULT_RISK_PROFILE:-moderate}
+    # Secrets injected at runtime — never hardcode keys here.
+    # Use a .env file or Docker secrets (see Compose secrets section below).
+    networks:
+      - altcoin-net
+    restart: "no"     # stdio servers are short-lived; don't auto-restart
+
+  # ── Test runner ─────────────────────────────────────────────────────────────
+  # Usage:  docker compose run --rm test
+  test:
+    build:
+      context: .
+      target: builder   # reuse the builder stage which has dev deps
+      dockerfile: Dockerfile.dev
+    image: altcoin-analyzer-mcp:test
+    container_name: altcoin-analyzer-test
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+    environment:
+      - LOG_LEVEL=WARNING
+      - CACHE_TTL_SECONDS=5
+      # Dummy keys so settings validation passes in tests
+      - ANTHROPIC_API_KEY=test-key
+      - OPENROUTER_API_KEY=test-key
+      - OPENAI_API_KEY=test-key
+      - GITHUB_TOKEN=test-token
+    command: ["pytest", "tests/", "-q", "--no-header"]
+    networks:
+      - altcoin-net
+    profiles:
+      - test   # only started with: docker compose --profile test run test
+
+  # ── Linter / type-checker ────────────────────────────────────────────────────
+  # Usage:  docker compose run --rm lint
+  lint:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: altcoin-analyzer-mcp:test
+    container_name: altcoin-analyzer-lint
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+    command: >
+      sh -c "ruff check src/ tests/ && echo '✓ ruff' &&
+             mypy src/ --ignore-missing-imports && echo '✓ mypy'"
+    profiles:
+      - lint
+
+networks:
+  altcoin-net:
+    driver: bridge
